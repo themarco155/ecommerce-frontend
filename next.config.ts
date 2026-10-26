@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // Modelo de caché moderno de Next.js 16 ("use cache" + cacheTag + Suspense)
   cacheComponents: true,
   partialPrefetching: true,
   turbopack: {
@@ -11,6 +11,10 @@ const nextConfig: NextConfig = {
         as: "*.css",
       },
     },
+  },
+  // La raíz del sitio lleva directo al catálogo
+  async redirects() {
+    return [{ source: "/", destination: "/products", permanent: false }];
   },
 };
 
