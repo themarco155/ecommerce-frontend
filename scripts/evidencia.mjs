@@ -305,14 +305,7 @@ async function runLighthouse(chromePath, list, summary) {
       summary.push(row);
       ok(`${run.label}: Rendimiento ${row.perf} · Accesibilidad ${row.a11y} · Buenas prácticas ${row.bp} · SEO ${row.seo}`);
 
-      // Captura de la parte superior del reporte
-      const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
-      await page.goto(pathToFileURL(htmlFile).href);
-      await page.waitForTimeout(3500); // espera la animación de los puntajes
-      const file = path.join(SHOTS, `lighthouse-${run.name}.png`);
-      await page.screenshot({ path: file });
-      list.push({ file, title: `Lighthouse · ${run.label}` });
-      await page.close();
+      list.push(await lighthouseShot(browser, run.name));
     } finally {
       // En Windows a veces falla al borrar la carpeta temporal de Chrome; no es grave.
       try {
@@ -323,6 +316,19 @@ async function runLighthouse(chromePath, list, summary) {
     }
   }
   await browser.close();
+}
+
+/** Captura la parte superior de un reporte HTML de Lighthouse (sin animaciones). */
+async function lighthouseShot(browser, name) {
+  const htmlFile = path.join(LH_DIR, `${name}.html`);
+  const page = await browser.newPage({ viewport: { width: 1280, height: 1000 }, reducedMotion: "reduce" });
+  await page.goto(pathToFileURL(htmlFile).href);
+  await page.addStyleTag({ content: "*{animation:none!important;transition:none!important} .lh-exp-gauge .metric__value,.lh-exp-gauge .metric__label{display:none!important} .lh-exp-gauge__percentage{display:none!important}" });
+  await page.waitForTimeout(2500);
+  const file = path.join(SHOTS, `lighthouse-${name}.png`);
+  await page.screenshot({ path: file });
+  await page.close();
+  return { file, title: TITLES[`lighthouse-${name}`] };
 }
 
 /** Lee los puntajes guardados dentro de los reportes HTML de Lighthouse. */
@@ -414,6 +420,10 @@ async function main() {
   if (onlySwagger) {
     const browser = await chromium.launch({ executablePath: chromePath });
     await swaggerShots(browser, []);
+    // Rehace también las capturas de los reportes de Lighthouse ya generados
+    for (const name of LH_ORDER) {
+      if (fs.existsSync(path.join(LH_DIR, `${name}.html`))) await lighthouseShot(browser, name);
+    }
     await browser.close();
     await buildPdf(chromePath);
     console.log("\n\x1b[32m✓ Listo.\x1b[0m Revisa docs/capturas y docs/evidencia.pdf\n");
