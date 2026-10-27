@@ -105,6 +105,8 @@ Con la API corriendo (`php artisan serve`), ejecuta:
 npm run evidencia
 ```
 
+En Windows también puedes hacer doble clic en `evidencia.bat`, que levanta la API si no está corriendo. Para rehacer solo las capturas de Swagger y el PDF, usa `npm run evidencia:swagger` o `evidencia-swagger.bat`.
+
 El script (`scripts/evidencia.mjs`) usa tu Chrome o Edge y hace todo solo:
 
 1. Compila el frontend y lo levanta en modo producción en `http://localhost:3100`.
