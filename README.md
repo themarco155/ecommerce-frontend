@@ -97,10 +97,27 @@ Usuario de prueba (lo crea el seeder de la API): `cliente@example.com` / `passwo
 - Web Vitals: `src/components/web-vitals.tsx` usa `useReportWebVitals` y muestra LCP, CLS, INP, FCP y TTFB en la consola (F12).
 - Sin fuentes externas ni imágenes pesadas; el encabezado tiene altura fija para que el CLS sea 0.
 
-## Evidencia
+## Evidencia (capturas, Lighthouse y PDF)
 
-- `docs/lighthouse/`: reportes de Lighthouse (ábrelos en el navegador).
-- `docs/capturas/`: capturas de Swagger y del flujo de compra.
+Con la API corriendo (`php artisan serve`), ejecuta:
+
+```bash
+npm run evidencia
+```
+
+El script (`scripts/evidencia.mjs`) usa tu Chrome o Edge y hace todo solo:
+
+1. Compila el frontend y lo levanta en modo producción en `http://localhost:3100`.
+2. Toma capturas de **Swagger** (lista de endpoints y detalle de login, crear orden y pagar).
+3. Recorre el **flujo completo de compra** contra la API real: catálogo → detalle → carrito → registro → crear orden → pago rechazado → pago aprobado con Stripe → confirmación → historial → ruta protegida.
+4. Corre **Lighthouse** (móvil y escritorio) y guarda los reportes.
+5. Junta todo en un PDF.
+
+Resultado:
+
+- `docs/capturas/`: capturas PNG.
+- `docs/lighthouse/`: reportes de Lighthouse en HTML.
+- `docs/evidencia.pdf`: todo en un solo documento.
 
 ## Estructura
 
