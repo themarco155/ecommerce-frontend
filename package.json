@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "evidencia": "node scripts/evidencia.mjs"
+    "evidencia": "node scripts/evidencia.mjs",
+    "evidencia:swagger": "node scripts/evidencia.mjs --solo-swagger"
   },
   "dependencies": {
     "@stripe/react-stripe-js": "^7.0.1",

@@ -26,6 +26,7 @@ const LH_DIR = path.join(ROOT, "docs", "lighthouse");
 const PORT = Number(process.env.EVIDENCIA_PORT ?? 3100);
 const APP = `http://localhost:${PORT}`;
 const skipBuild = process.argv.includes("--skip-build");
+const onlySwagger = process.argv.includes("--solo-swagger");
 
 /* ---------- Configuración ---------- */
 
@@ -45,6 +46,29 @@ function readEnvFile() {
 const fileEnv = readEnvFile();
 const API = (process.env.API_BASE_URL ?? fileEnv.API_BASE_URL ?? "http://127.0.0.1:8000/api").replace(/\/$/, "");
 const SWAGGER = API.replace(/\/api$/, "") + "/api/documentation";
+
+// Títulos de cada captura (el PDF arma su índice con estos nombres)
+const TITLES = {
+  "01-swagger-endpoints": "Swagger UI: endpoints de la API",
+  "02-swagger-login": "Swagger: POST /api/login (consumido por el login)",
+  "03-swagger-crear-orden": "Swagger: POST /api/orders (consumido al crear la orden)",
+  "04-swagger-pagar-orden": "Swagger: POST /api/orders/{id}/pay (pago con Stripe)",
+  "05-catalogo": "Catálogo público (GET /api/products)",
+  "06-detalle-producto": "Detalle de producto (GET /api/products/{id})",
+  "07-carrito": "Carrito con estado local (agregar / quitar productos)",
+  "08-registro": "Registro de cliente (Server Action → POST /api/register)",
+  "09-checkout": "Orden creada (Server Action → POST /api/orders) y pantalla de pago",
+  "10-pago-rechazado": "Pago rechazado por Stripe: el error se muestra sin salir de la página",
+  "11-confirmacion": "Confirmación de compra (POST /api/orders/{id}/pay con Stripe)",
+  "12-historial": "Historial de compras protegido (GET /api/orders)",
+  "13-detalle-orden": "Detalle de la orden pagada (GET /api/orders/{id})",
+  "14-ruta-protegida": "Sin sesión, /orders redirige al login (proxy.ts)",
+  "lighthouse-catalogo-movil": "Lighthouse · Catálogo (móvil)",
+  "lighthouse-catalogo-escritorio": "Lighthouse · Catálogo (escritorio)",
+  "lighthouse-detalle-producto-movil": "Lighthouse · Detalle de producto (móvil)",
+  "lighthouse-carrito-movil": "Lighthouse · Carrito (móvil)",
+};
+const LH_ORDER = ["catalogo-movil", "catalogo-escritorio", "detalle-producto-movil", "carrito-movil"];
 
 const log = (msg) => console.log(`\x1b[36m▶\x1b[0m ${msg}`);
 const ok = (msg) => console.log(`\x1b[32m✓\x1b[0m ${msg}`);
@@ -108,18 +132,28 @@ async function swaggerShots(browser, list) {
   const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
   try {
     await page.goto(SWAGGER, { waitUntil: "networkidle", timeout: 30000 });
-    await page.waitForSelector(".opblock", { timeout: 20000 });
-    await shot(page, "01-swagger-endpoints", "Swagger UI: todos los endpoints de la API", list);
+    // Swagger viene con las secciones cerradas (doc_expansion = none): las abrimos todas
+    await page.waitForSelector(".opblock-tag", { timeout: 20000 });
+    const tags = page.locator(".opblock-tag");
+    for (let i = 0; i < (await tags.count()); i++) {
+      const tag = tags.nth(i);
+      if ((await tag.getAttribute("data-is-open")) !== "true") await tag.click();
+      await page.waitForTimeout(250);
+    }
+    await page.waitForSelector(".opblock", { timeout: 15000 });
+    await shot(page, "01-swagger-endpoints", TITLES["01-swagger-endpoints"], list);
 
-    // Detalle de los endpoints clave que consume el frontend
-    for (const [method, route, name, title] of [
-      ["post", "/api/login", "02-swagger-login", "Swagger: POST /api/login"],
-      ["post", "/api/orders", "03-swagger-crear-orden", "Swagger: POST /api/orders"],
-      ["post", "/api/orders/{order}/pay", "04-swagger-pagar-orden", "Swagger: POST /api/orders/{order}/pay (Stripe)"],
+    // Detalle de los endpoints clave que consume el frontend.
+    // En el JSON de Swagger las rutas no llevan /api (va en el "server"), por eso buscamos por el final.
+    for (const [method, route, name] of [
+      ["post", "/login", "02-swagger-login"],
+      ["post", "/orders", "03-swagger-crear-orden"],
+      ["post", "/orders/{id}/pay", "04-swagger-pagar-orden"],
     ]) {
       const block = page.locator(`.opblock-${method}`).filter({
-        has: page.locator(".opblock-summary-path", { hasText: new RegExp(`^${route.replace(/[{}]/g, "\\$&")}$`) }),
+        has: page.locator(`.opblock-summary-path[data-path$="${route}"]`),
       }).first();
+      const title = TITLES[name];
       if (!(await block.count())) {
         warn(`No encontré ${method.toUpperCase()} ${route} en Swagger`);
         continue;
@@ -291,8 +325,41 @@ async function runLighthouse(chromePath, list, summary) {
   await browser.close();
 }
 
-async function buildPdf(chromePath, list, summary) {
+/** Lee los puntajes guardados dentro de los reportes HTML de Lighthouse. */
+function readLighthouseSummary() {
+  const rows = [];
+  for (const name of LH_ORDER) {
+    const file = path.join(LH_DIR, `${name}.html`);
+    if (!fs.existsSync(file)) continue;
+    const html = fs.readFileSync(file, "utf8");
+    const m = html.match(/window\.__LIGHTHOUSE_JSON__ = (\{[\s\S]*?\});\s*<\/script>/);
+    if (!m) continue;
+    const lhr = JSON.parse(m[1]);
+    const c = lhr.categories;
+    const a = lhr.audits;
+    rows.push({
+      label: TITLES[`lighthouse-${name}`].replace("Lighthouse · ", ""),
+      perf: Math.round(c.performance.score * 100),
+      a11y: Math.round(c.accessibility.score * 100),
+      bp: Math.round(c["best-practices"].score * 100),
+      seo: Math.round(c.seo.score * 100),
+      lcp: a["largest-contentful-paint"].displayValue,
+      cls: a["cumulative-layout-shift"].displayValue,
+      tbt: a["total-blocking-time"].displayValue,
+    });
+  }
+  return rows;
+}
+
+async function buildPdf(chromePath) {
   log("Armando docs/evidencia.pdf");
+  // Usa todas las capturas que haya en docs/capturas (en orden) y los reportes guardados
+  const list = fs
+    .readdirSync(SHOTS)
+    .filter((f) => f.endsWith(".png"))
+    .sort()
+    .map((f) => ({ file: path.join(SHOTS, f), title: TITLES[f.replace(/\.png$/, "")] ?? f }));
+  const summary = readLighthouseSummary();
   const img = (f) => `data:image/png;base64,${fs.readFileSync(f).toString("base64")}`;
   const rows = summary
     .map((r) => `<tr><td>${r.label}</td><td>${r.perf}</td><td>${r.a11y}</td><td>${r.bp}</td><td>${r.seo}</td><td>${r.lcp}</td><td>${r.cls}</td><td>${r.tbt}</td></tr>`)
@@ -343,6 +410,16 @@ async function main() {
   const chromePath = browserPath();
   ok(`Navegador: ${chromePath}`);
 
+  // Solo rehacer las capturas de Swagger y el PDF (sin repetir compra ni Lighthouse)
+  if (onlySwagger) {
+    const browser = await chromium.launch({ executablePath: chromePath });
+    await swaggerShots(browser, []);
+    await browser.close();
+    await buildPdf(chromePath);
+    console.log("\n\x1b[32m✓ Listo.\x1b[0m Revisa docs/capturas y docs/evidencia.pdf\n");
+    return;
+  }
+
   if (!skipBuild) {
     log("Compilando el frontend (npm run build)");
     execSync("npm run build", { cwd: ROOT, stdio: "inherit", env: { ...process.env, API_BASE_URL: API } });
@@ -371,7 +448,7 @@ async function main() {
     await browser.close();
 
     await runLighthouse(chromePath, list, summary);
-    await buildPdf(chromePath, list, summary);
+    await buildPdf(chromePath);
 
     console.log("\n\x1b[32m✓ Evidencia lista.\x1b[0m Revisa docs/capturas, docs/lighthouse y docs/evidencia.pdf\n");
   } finally {
